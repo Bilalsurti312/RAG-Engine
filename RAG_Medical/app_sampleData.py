@@ -85,36 +85,39 @@ def ask_question(req: QueryRequest):
     results = db.similarity_search(req.query, k=10)
     context = "\n\n".join([r.page_content for r in results])
 
-    # HR's System Prompt Integration
-    system_prompt = f"""
-    You are an AI assistant operating within a Retrieval-Augmented Generation (RAG) system that processes sensitive patient medical information.
-    RETRIEVED DATA:
-    {context}
+    # HR'S EXACT SYSTEM PROMPT + REINFORCED CLEANUP
+    system_prompt = """You are an AI assistant operating within a Retrieval-Augmented Generation (RAG) system that processes sensitive patient medical information.
+The retrieved data consists of:
+Patient reports generated from medical devices
+Digitized and scanned medical report documents
+Your task is to:
+Use only the retrieved patient-specific data provided in the context
+Interpret the information accurately and conservatively
+Generate clear, contextual, and medically relevant answers to user queries
+Avoid speculation and do not introduce information that is not present in the retrieved data
+Ensure that all responses:
+Respect patient privacy and data sensitivity
+Are grounded strictly in the supplied medical records
+Clearly indicate uncertainty or missing information when the data is insufficient
+You can provide diagnoses, treatment decisions, or medical advice beyond what is explicitly supported by the retrieved patient data. Please always mention that the information is not a medical advice. Please consult a doctor for actual medical advise.
+IMPORTANT: THE OUTPUT MUST BE PLAIN TEXT ONLY. DO NOT USE MARKDOWN (NO **). DO NOT USE NEWLINES (NO \\n). ALL CONTENT MUST BE IN A SINGLE, CLEAN PARAGRAPH."""
 
-    YOUR TASKS:
-    1. Use only the retrieved patient-specific data provided in the context.
-    2. Interpret information accurately and conservatively. Generate clear, contextual, and relevant answers.
-    3. Avoid speculation and do not introduce information not present in the data.
-    4. Clearly indicate uncertainty or missing information when data is insufficient (e.g., specific dates like 18th of June).
-    5. You can provide diagnoses or medical advice if supported by data, but ALWAYS mention: "This information is not medical advice. Please consult a doctor for actual medical advice."
+    final_prompt = f"{system_prompt}\n\nRetrieved Context:\n{context}\n\nUser Query: {req.query}"
 
-    OUTPUT FORMAT:
-    - [Test Name] : [Value] [Unit]
-      → [Clinical Interpretation/Trend]
+    response = llm.invoke(final_prompt)
     
-    Summary:
-    [Bullet points highlighting trends or critical actions]
-    """
+    # NEW LOGIC: This double-clean ensures literal \n and actual newlines are removed
+    raw_content = response.content.strip().replace("**", "")
+    # Removes both physical newlines and literal '\n' characters
+    clean_answer = " ".join(raw_content.splitlines()).replace("\\n", " ")
 
-    response = llm.invoke(system_prompt + f"\n\nUser Query: {req.query}")
-    raw_answer = response.content.strip()
-    
-    # summary generation following the same bullet format
-    summary_prompt = f"Condense this medical analysis into 3 key bullet points using the approved format:\n{raw_answer}"
+    # Apply the same clean logic to the summary
+    summary_prompt = f"Condense this into a 1-sentence plain text summary: {clean_answer}"
     summary_resp = llm.invoke(summary_prompt)
+    clean_summary = " ".join(summary_resp.content.strip().replace("**", "").splitlines()).replace("\\n", " ")
     
     return {
         "query": req.query,
-        "answer": raw_answer,
-        "summary": summary_resp.content.strip()
+        "answer": clean_answer,
+        "summary": clean_summary
     }
