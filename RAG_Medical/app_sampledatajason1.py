@@ -69,13 +69,14 @@ app = FastAPI()
 class QueryRequest(BaseModel):
     query: str
 
-# 4. CLINICAL INTELLIGENCE ENDPOINT
+# 4. SPECIFIC INTELLIGENCE ENDPOINT
 @app.post("/ask")
 def ask_question(req: QueryRequest):
-    results = db.similarity_search(req.query, k=12)
+    # Retrieve relevant records
+    results = db.similarity_search(req.query, k=10)
     context = "\n\n".join([r.page_content for r in results])
 
-    # USING THE EXACT PROMPT WITHOUT CHANGES
+    # EXACT SYSTEM PROMPT + REINFORCED CLEANUP
     system_prompt = """You are an AI assistant operating within a Retrieval-Augmented Generation (RAG) system that processes sensitive patient medical information.
 The retrieved data consists of:
 Patient reports generated from medical devices
@@ -89,19 +90,25 @@ Ensure that all responses:
 Respect patient privacy and data sensitivity
 Are grounded strictly in the supplied medical records
 Clearly indicate uncertainty or missing information when the data is insufficient
-You can provide diagnoses, treatment decisions, or medical advice beyond what is explicitly supported by the retrieved patient data. Please always mention that the information is not a medical advice. Please consult a doctor for actual medical advise"""
+You can provide diagnoses, treatment decisions, or medical advice beyond what is explicitly supported by the retrieved patient data. Please always mention that the information is not a medical advice. Please consult a doctor for actual medical advise.
+IMPORTANT: THE OUTPUT MUST BE PLAIN TEXT ONLY. DO NOT USE MARKDOWN (NO **). DO NOT USE NEWLINES (NO \\n). ALL CONTENT MUST BE IN A SINGLE, CLEAN PARAGRAPH."""
 
-    # Final prompt combining the strict instructions with the RAG context
     final_prompt = f"{system_prompt}\n\nRetrieved Context:\n{context}\n\nUser Query: {req.query}"
 
     response = llm.invoke(final_prompt)
-    raw_answer = response.content.strip()
     
-    # Simple summary call using the same strict instructions
-    summary_response = llm.invoke(f"{system_prompt}\n\nContext: {raw_answer}\n\nTask: Condense the above into the 3 most important points using bullet points.")
+    # NEW LOGIC: This double-clean ensures literal \n and actual newlines are removed
+    raw_content = response.content.strip().replace("**", "")
+    # Removes both physical newlines and literal '\n' characters
+    clean_answer = " ".join(raw_content.splitlines()).replace("\\n", " ")
+
+    # Apply the same clean logic to the summary
+    summary_prompt = f"Condense this into a 1-sentence plain text summary: {clean_answer}"
+    summary_resp = llm.invoke(summary_prompt)
+    clean_summary = " ".join(summary_resp.content.strip().replace("**", "").splitlines()).replace("\\n", " ")
     
     return {
         "query": req.query,
-        "answer": raw_answer,
-        "summary": summary_response.content.strip()
+        "answer": clean_answer,
+        "summary": clean_summary
     }
