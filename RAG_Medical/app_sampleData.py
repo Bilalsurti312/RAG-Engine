@@ -85,7 +85,7 @@ def ask_question(req: QueryRequest):
     results = db.similarity_search(req.query, k=10)
     context = "\n\n".join([r.page_content for r in results])
 
-    # HR'S EXACT SYSTEM PROMPT + REINFORCED CLEANUP
+    # EXACT SYSTEM PROMPT + REINFORCED CLEANUP
     system_prompt = """You are an AI assistant operating within a Retrieval-Augmented Generation (RAG) system that processes sensitive patient medical information.
 The retrieved data consists of:
 Patient reports generated from medical devices
@@ -121,3 +121,4 @@ IMPORTANT: THE OUTPUT MUST BE PLAIN TEXT ONLY. DO NOT USE MARKDOWN (NO **). DO N
         "answer": clean_answer,
         "summary": clean_summary
     }
+
