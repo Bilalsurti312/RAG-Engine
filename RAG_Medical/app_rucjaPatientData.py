@@ -93,12 +93,12 @@ class QueryRequest(BaseModel):
 # 4. CLINICAL INTELLIGENCE ENDPOINT
 @app.post("/ask")
 def ask_question(req: QueryRequest):
-    # Retrieve relevant records across OCR and Device data
-    results = db.similarity_search(req.query, k=15)
+    # Retrieve relevant records
+    results = db.similarity_search(req.query, k=10)
     context = "\n\n".join([r.page_content for r in results])
 
-    # SYSTEM PROMPT
-    prompt = """You are an AI assistant operating within a Retrieval-Augmented Generation (RAG) system that processes sensitive patient medical information.
+    # HR'S EXACT SYSTEM PROMPT + REINFORCED CLEANUP
+    system_prompt = """You are an AI assistant operating within a Retrieval-Augmented Generation (RAG) system that processes sensitive patient medical information.
 The retrieved data consists of:
 Patient reports generated from medical devices
 Digitized and scanned medical report documents
@@ -111,22 +111,28 @@ Ensure that all responses:
 Respect patient privacy and data sensitivity
 Are grounded strictly in the supplied medical records
 Clearly indicate uncertainty or missing information when the data is insufficient
-You can provide diagnoses, treatment decisions, or medical advice beyond what is explicitly supported by the retrieved patient data. Please always mention that the information is not a medical advice. Please consult a doctor for actual medical advise"""
+You can provide diagnoses, treatment decisions, or medical advice beyond what is explicitly supported by the retrieved patient data. Please always mention that the information is not a medical advice. Please consult a doctor for actual medical advise.
+IMPORTANT: THE OUTPUT MUST BE PLAIN TEXT ONLY. DO NOT USE MARKDOWN (NO **). DO NOT USE NEWLINES (NO \\n). ALL CONTENT MUST BE IN A SINGLE, CLEAN PARAGRAPH."""
 
-    # Assemble final query with context 
-    final_query = f"{prompt}\n\nRELEVANT DATA CONTEXT:\n{context}\n\nUSER QUESTION: {req.query}"
+    final_prompt = f"{system_prompt}\n\nRetrieved Context:\n{context}\n\nUser Query: {req.query}"
 
-    response = llm.invoke(final_query)
-    raw_answer = response.content.strip()
+    response = llm.invoke(final_prompt)
     
-    # Generate summary key
-    summary_resp = llm.invoke(f"Condense the following medical interpretation into 3 bullet points using the same patient-specific facts:\n{raw_answer}")
+    # NEW LOGIC: This double-clean ensures literal \n and actual newlines are removed
+    raw_content = response.content.strip().replace("**", "")
+    # Removes both physical newlines and literal '\n' characters
+    clean_answer = " ".join(raw_content.splitlines()).replace("\\n", " ")
+
+    # Apply the same clean logic to the summary
+    summary_prompt = f"Condense this into a 1-sentence plain text summary: {clean_answer}"
+    summary_resp = llm.invoke(summary_prompt)
+    clean_summary = " ".join(summary_resp.content.strip().replace("**", "").splitlines()).replace("\\n", " ")
     
     return {
         "query": req.query,
-        "answer": raw_answer,
-        "summary": summary_resp.content.strip()
+        "answer": clean_answer,
+        "summary": clean_summary
     }
-
     #By the way, this dataset is a pdf dataset which is been converted to json data, 
+
       #and its the input of "sampledatajason1.json" data
